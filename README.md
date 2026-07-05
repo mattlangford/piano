@@ -1,11 +1,11 @@
-# Chord Trainer (Bazel + C++)
+# Chord Trainer
 
 A terminal-based MIDI ear/shape practice app.
 
 ## Features
 
 - Random chord prompts by level
-- MIDI input listening via CoreMIDI (macOS)
+- MIDI input listening via CoreMIDI (MacOS Only)
 - Exact chord matching by pitch class
 - Reports correctness and response time
 - Continuous rounds until Ctrl+C
@@ -51,10 +51,10 @@ Use both flags together for silent terminal-only testing:
 bazel run //:practice -- --level 1 --keyboard --quiet
 ```
 
-Type note names per attempt (space or comma separated), for example:
+Type note names per attempt (space separated), for example:
 
 - `C E G`
-- `Bb,D,F`
+- `Bb D F`
 - `F# A# C#`
 
 If you get a chord wrong, the app prints the target semitone tuple and asks again.

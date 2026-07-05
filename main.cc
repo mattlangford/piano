@@ -300,14 +300,7 @@ std::optional<int> parse_single_note_token(const std::string& token) {
 }
 
 std::optional<std::set<int>> parse_keyboard_attempt_line(const std::string& line) {
-  std::string normalized = line;
-  for (char& c : normalized) {
-    if (c == ',') {
-      c = ' ';
-    }
-  }
-
-  std::istringstream iss(normalized);
+  std::istringstream iss(line);
   std::set<int> pitch_classes;
   std::string token;
   while (iss >> token) {
@@ -500,7 +493,7 @@ int main(int argc, char** argv) {
     }
 
     const OSStatus port_status =
-      MIDIInputPortCreate(client, CFSTR("ChordTrainerIn"), read_midi_packets, &midi_state, &input_port);
+        MIDIInputPortCreate(client, CFSTR("ChordTrainerIn"), read_midi_packets, &midi_state, &input_port);
     if (port_status != noErr) {
       std::cerr << "Failed to create MIDI input port (status " << port_status << ")\n";
       MIDIClientDispose(client);
@@ -626,5 +619,6 @@ int main(int argc, char** argv) {
     MIDIPortDispose(input_port);
     MIDIClientDispose(client);
   }
+
   return 0;
 }
