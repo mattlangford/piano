@@ -305,6 +305,22 @@ void print_chord_breakdown(const std::unordered_map<std::string, CategoryStats>&
   });
 
   std::cout << "Chord breakdown (weaker to stronger):\n";
+  std::size_t max_chord_width = std::string("Chord").size();
+  for (const auto& [chord, _] : rows) {
+    max_chord_width = std::max(max_chord_width, chord.size());
+  }
+  const int chord_width = static_cast<int>(max_chord_width);
+  constexpr int kAccuracyWidth = 8;
+  constexpr int kWrongWidth = 5;
+  constexpr int kAvgWidth = 8;
+  std::cout << "  " << std::left << std::setw(chord_width) << "Chord"
+            << " | " << std::right << std::setw(kAccuracyWidth) << "Accuracy"
+            << " | " << std::setw(kWrongWidth) << "Wrong"
+            << " | " << std::setw(kAvgWidth) << "Avg" << "\n";
+  std::cout << "  " << std::string(max_chord_width, '-')
+            << " | " << std::string(kAccuracyWidth, '-')
+            << " | " << std::string(kWrongWidth, '-')
+            << " | " << std::string(kAvgWidth, '-') << "\n";
   for (const auto& [chord, stats] : rows) {
     const int total_attempts = stats.correct + stats.wrong_attempts;
     const double accuracy =
@@ -315,13 +331,18 @@ void print_chord_breakdown(const std::unordered_map<std::string, CategoryStats>&
         (stats.correct > 0)
             ? (static_cast<double>(stats.total_response_ms) / stats.correct) / 1000.0
             : 0.0;
-    std::cout << "  " << chord << " | attempt accuracy " << std::fixed << std::setprecision(1)
-              << accuracy << "%"
-              << ", wrong attempts " << stats.wrong_attempts;
+    std::ostringstream avg_cell;
     if (stats.correct > 0) {
-      std::cout << ", avg " << std::fixed << std::setprecision(2) << avg_s << "s";
+      avg_cell << std::fixed << std::setprecision(2) << avg_s << "s";
+    } else {
+      avg_cell << "n/a";
     }
-    std::cout << "\n";
+    std::cout << "  " << std::left << std::setw(chord_width) << chord
+              << " | " << std::right << std::setw(kAccuracyWidth - 1)
+              << std::fixed << std::setprecision(1)
+              << accuracy << "%"
+              << " | " << std::setw(kWrongWidth) << stats.wrong_attempts
+              << " | " << std::setw(kAvgWidth) << avg_cell.str() << "\n";
   }
 }
 

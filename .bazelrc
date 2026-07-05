@@ -1,2 +1,6 @@
 build --copt=-Werror
 build --cxxopt=-Werror
+build --copt=-Wall
+build --cxxopt=-Wall
+build --copt=-Wextra
+build --cxxopt=-Wextra
