@@ -26,17 +26,29 @@ bazel build //:practice
 ## Run
 
 ```bash
-bazel run //:practice -- 1
+bazel run //:practice -- --level 1
 ```
 
 Replace `1` with `2` or `3` for harder levels.
+
+Disable audio preview if needed:
+
+```bash
+bazel run //:practice -- --level 1 --quiet
+```
 
 ## Terminal-Only Testing
 
 Use keyboard mode to test without a MIDI device:
 
 ```bash
-bazel run //:practice -- 1 --keyboard
+bazel run //:practice -- --level 1 --keyboard
+```
+
+Use both flags together for silent terminal-only testing:
+
+```bash
+bazel run //:practice -- --level 1 --keyboard --quiet
 ```
 
 Type note names per attempt (space or comma separated), for example:
@@ -51,4 +63,5 @@ If you get a chord wrong, the app prints the target semitone tuple and asks agai
 
 - Requires macOS CoreMIDI and an available MIDI input source.
 - `--keyboard` bypasses CoreMIDI and uses typed note names instead.
+- `--quiet` disables the audible chord preview.
 - The trainer waits until all keys are released before issuing the next prompt.

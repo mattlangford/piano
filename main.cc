@@ -9,8 +9,10 @@
 #include <csignal>
 #include <cctype>
 #include <cstdint>
+#include <cerrno>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -18,11 +20,15 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <sys/select.h>
+#include <thread>
+#include <unistd.h>
 #include <vector>
 
 namespace {
 
 std::atomic<bool> g_running = true;
+std::atomic<int> g_preview_index = 0;
 
 void handle_signal(int) {
   g_running = false;
@@ -42,6 +48,7 @@ struct ChordQuestion {
 struct Options {
   int level = 1;
   bool keyboard_mode = false;
+  bool quiet_mode = false;
 };
 
 class MidiState {
@@ -199,26 +206,37 @@ ChordQuestion next_question(int level, std::mt19937& rng) {
 }
 
 void print_usage() {
-  std::cerr << "Usage: bazel run //:practice -- [level 1-3] [--keyboard]\n";
+  std::cerr << "Usage: bazel run //:practice -- [--level 1-3] [--keyboard] [--quiet]\n";
 }
 
 std::optional<Options> parse_options(int argc, char** argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--level") {
+      if (i + 1 >= argc) {
+        return std::nullopt;
+      }
+      try {
+        const int parsed_level = std::stoi(argv[++i]);
+        if (parsed_level < 1 || parsed_level > 3) {
+          return std::nullopt;
+        }
+        options.level = parsed_level;
+      } catch (...) {
+        return std::nullopt;
+      }
+      continue;
+    }
     if (arg == "--keyboard") {
       options.keyboard_mode = true;
       continue;
     }
-    try {
-      const int parsed_level = std::stoi(arg);
-      if (parsed_level < 1 || parsed_level > 3) {
-        return std::nullopt;
-      }
-      options.level = parsed_level;
-    } catch (...) {
-      return std::nullopt;
+    if (arg == "--quiet") {
+      options.quiet_mode = true;
+      continue;
     }
+    return std::nullopt;
   }
   return options;
 }
@@ -312,12 +330,36 @@ std::optional<std::set<int>> read_keyboard_attempt(std::atomic<bool>& running) {
   }
 
   std::cout << "Notes> " << std::flush;
-  std::string line;
-  if (!std::getline(std::cin, line)) {
-    running = false;
-    return std::nullopt;
+  while (running) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(STDIN_FILENO, &read_fds);
+
+    timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100000;
+
+    const int ready = select(STDIN_FILENO + 1, &read_fds, nullptr, nullptr, &timeout);
+    if (ready < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      running = false;
+      return std::nullopt;
+    }
+    if (ready == 0) {
+      continue;
+    }
+
+    std::string line;
+    if (!std::getline(std::cin, line)) {
+      running = false;
+      return std::nullopt;
+    }
+    return parse_keyboard_attempt_line(line);
   }
-  return parse_keyboard_attempt_line(line);
+
+  return std::nullopt;
 }
 
 bool write_chord_preview_wav(const std::set<int>& pitch_classes,
@@ -356,12 +398,14 @@ bool write_chord_preview_wav(const std::set<int>& pitch_classes,
     value /= static_cast<double>(freqs_hz.size());
 
     const double attack = 0.01;
-    const double release = 0.05;
+    const double fade_start = 0.5;
+    const double fade_end = 1.0;
     double env = 1.0;
     if (t < attack) {
       env = t / attack;
-    } else if (t > seconds - release) {
-      env = std::max(0.0, (seconds - t) / release);
+    }
+    if (t >= fade_start) {
+      env *= std::max(0.0, (fade_end - t) / (fade_end - fade_start));
     }
     value *= env;
 
@@ -408,13 +452,18 @@ bool write_chord_preview_wav(const std::set<int>& pitch_classes,
 }
 
 void play_chord_preview(const std::set<int>& pitch_classes) {
-  const std::string wav_path = "/tmp/practice_chord_preview.wav";
-  if (!write_chord_preview_wav(pitch_classes, wav_path, 0.5)) {
+  const int preview_index = g_preview_index.fetch_add(1);
+  const std::string wav_path =
+      "/tmp/practice_chord_preview_" + std::to_string(preview_index) + ".wav";
+  if (!write_chord_preview_wav(pitch_classes, wav_path, 1.0)) {
     return;
   }
-  const std::string cmd = "afplay -q 1 " + wav_path;
-  const int rc = std::system(cmd.c_str());
-  (void)rc;
+  std::thread([wav_path] {
+    const std::string cmd = "afplay -q 1 " + wav_path;
+    const int rc = std::system(cmd.c_str());
+    (void)rc;
+    std::remove(wav_path.c_str());
+  }).detach();
 }
 
 }  // namespace
@@ -492,11 +541,16 @@ int main(int argc, char** argv) {
   } else {
     std::cout << "Press chords exactly (no extra pitch classes). Ctrl+C to quit.\n\n";
   }
+  if (options.quiet_mode) {
+    std::cout << "Quiet mode enabled: chord preview audio is off.\n\n";
+  }
 
   std::random_device rd;
   std::mt19937 rng(rd());
 
   int rounds = 0;
+  int total_attempts = 0;
+  long long total_response_ms = 0;
   while (g_running) {
     if (!options.keyboard_mode) {
       midi_state.wait_for_all_notes_off(g_running);
@@ -507,7 +561,9 @@ int main(int argc, char** argv) {
 
     ChordQuestion question = next_question(level, rng);
     std::cout << "Play: " << question.name << '\n';
-    play_chord_preview(question.pitch_classes);
+    if (!options.quiet_mode) {
+      play_chord_preview(question.pitch_classes);
+    }
 
     const auto start = std::chrono::steady_clock::now();
     bool solved = false;
@@ -527,6 +583,8 @@ int main(int argc, char** argv) {
         break;
       }
 
+      ++total_attempts;
+
       if (*attempt == question.pitch_classes) {
         solved = true;
         break;
@@ -544,11 +602,25 @@ int main(int argc, char** argv) {
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     std::cout << "Correct in " << (elapsed / 1000.0) << "s\n\n";
+    total_response_ms += elapsed;
     ++rounds;
   }
 
-  std::cout << "Session ended after " << rounds << " chord"
+  std::cout << "\nSession ended after " << rounds << " chord"
             << (rounds == 1 ? "" : "s") << ".\n";
+  std::cout << "Score: " << rounds << "\n";
+  if (rounds > 0) {
+    const double avg_seconds = (static_cast<double>(total_response_ms) / rounds) / 1000.0;
+    std::cout << "Average time to respond: " << std::fixed << std::setprecision(2)
+              << avg_seconds << "s\n";
+  } else {
+    std::cout << "Average time to respond: n/a\n";
+  }
+  if (total_attempts > 0) {
+    const double accuracy_pct = (100.0 * rounds) / static_cast<double>(total_attempts);
+    std::cout << "Accuracy: " << std::fixed << std::setprecision(1)
+              << accuracy_pct << "%\n";
+  }
 
   if (!options.keyboard_mode) {
     MIDIPortDispose(input_port);
