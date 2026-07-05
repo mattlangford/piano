@@ -1,13 +1,16 @@
 #include <CoreMIDI/CoreMIDI.h>
-#include <CoreMIDI/CoreMIDI.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <csignal>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -21,7 +24,7 @@ namespace {
 
 std::atomic<bool> g_running = true;
 
-void HandleSignal(int) {
+void handle_signal(int) {
   g_running = false;
 }
 
@@ -43,7 +46,7 @@ struct Options {
 
 class MidiState {
  public:
-  void OnNoteOn(int note) {
+  void on_note_on(int note) {
     if (note < 0 || note >= 128) {
       return;
     }
@@ -54,7 +57,7 @@ class MidiState {
     cv_.notify_all();
   }
 
-  void OnNoteOff(int note) {
+  void on_note_off(int note) {
     if (note < 0 || note >= 128) {
       return;
     }
@@ -67,16 +70,16 @@ class MidiState {
     cv_.notify_all();
   }
 
-  std::optional<std::set<int>> WaitForAttempt(const std::atomic<bool>& running) {
+  std::optional<std::set<int>> wait_for_attempt(const std::atomic<bool>& running) {
     std::unique_lock<std::mutex> lock(mu_);
-    cv_.wait(lock, [&] { return !running || !CurrentPitchClassesLocked().empty(); });
+    cv_.wait(lock, [&] { return !running || !current_pitch_classes_locked().empty(); });
     if (!running) {
       return std::nullopt;
     }
 
     std::set<int> attempt_pitch_classes;
     while (running) {
-      const std::set<int> current = CurrentPitchClassesLocked();
+      const std::set<int> current = current_pitch_classes_locked();
       if (current.empty()) {
         if (!attempt_pitch_classes.empty()) {
           return attempt_pitch_classes;
@@ -89,13 +92,13 @@ class MidiState {
     return std::nullopt;
   }
 
-  void WaitForAllNotesOff(const std::atomic<bool>& running) {
+  void wait_for_all_notes_off(const std::atomic<bool>& running) {
     std::unique_lock<std::mutex> lock(mu_);
-    cv_.wait(lock, [&] { return !running || CurrentPitchClassesLocked().empty(); });
+    cv_.wait(lock, [&] { return !running || current_pitch_classes_locked().empty(); });
   }
 
  private:
-  std::set<int> CurrentPitchClassesLocked() const {
+  std::set<int> current_pitch_classes_locked() const {
     std::set<int> classes;
     for (int note = 0; note < static_cast<int>(active_note_counts_.size()); ++note) {
       if (active_note_counts_[note] > 0) {
@@ -110,9 +113,9 @@ class MidiState {
   std::condition_variable cv_;
 };
 
-void ReadMidiPackets(const MIDIPacketList* packet_list,
-                     void* read_proc_ref_con,
-                     void* /*src_conn_ref_con*/) {
+void read_midi_packets(const MIDIPacketList* packet_list,
+                       void* read_proc_ref_con,
+                       void* /*src_conn_ref_con*/) {
   auto* state = static_cast<MidiState*>(read_proc_ref_con);
   const MIDIPacket* packet = &packet_list->packet[0];
 
@@ -124,9 +127,9 @@ void ReadMidiPackets(const MIDIPacketList* packet_list,
         const int note = packet->data[index + 1];
         const int velocity = packet->data[index + 2];
         if (status == 0x90 && velocity > 0) {
-          state->OnNoteOn(note);
+          state->on_note_on(note);
         } else {
-          state->OnNoteOff(note);
+          state->on_note_off(note);
         }
         index += 3;
       } else {
@@ -138,7 +141,7 @@ void ReadMidiPackets(const MIDIPacketList* packet_list,
   }
 }
 
-std::vector<ChordPattern> PatternsForLevel(int level) {
+std::vector<ChordPattern> patterns_for_level(int level) {
   std::vector<ChordPattern> patterns = {
       {"", {0, 4, 7}},
       {"m", {0, 3, 7}},
@@ -161,12 +164,12 @@ std::vector<ChordPattern> PatternsForLevel(int level) {
   return patterns;
 }
 
-ChordQuestion NextQuestion(int level, std::mt19937& rng) {
+ChordQuestion next_question(int level, std::mt19937& rng) {
   static const std::array<std::string, 12> kRootNames = {
       "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
   };
 
-  const auto patterns = PatternsForLevel(level);
+  const auto patterns = patterns_for_level(level);
 
   std::uniform_int_distribution<int> root_dist(0, 11);
   std::uniform_int_distribution<std::size_t> pattern_dist(0, patterns.size() - 1);
@@ -195,11 +198,11 @@ ChordQuestion NextQuestion(int level, std::mt19937& rng) {
   };
 }
 
-void PrintUsage() {
+void print_usage() {
   std::cerr << "Usage: bazel run //:practice -- [level 1-3] [--keyboard]\n";
 }
 
-std::optional<Options> ParseOptions(int argc, char** argv) {
+std::optional<Options> parse_options(int argc, char** argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -220,7 +223,7 @@ std::optional<Options> ParseOptions(int argc, char** argv) {
   return options;
 }
 
-int NormalizePitchClass(int semitone) {
+int normalize_pitch_class(int semitone) {
   int normalized = semitone % 12;
   if (normalized < 0) {
     normalized += 12;
@@ -228,7 +231,7 @@ int NormalizePitchClass(int semitone) {
   return normalized;
 }
 
-std::optional<int> ParseSingleNoteToken(const std::string& token) {
+std::optional<int> parse_single_note_token(const std::string& token) {
   if (token.empty()) {
     return std::nullopt;
   }
@@ -275,10 +278,10 @@ std::optional<int> ParseSingleNoteToken(const std::string& token) {
     ++i;
   }
 
-  return NormalizePitchClass(semitone);
+  return normalize_pitch_class(semitone);
 }
 
-std::optional<std::set<int>> ParseKeyboardAttemptLine(const std::string& line) {
+std::optional<std::set<int>> parse_keyboard_attempt_line(const std::string& line) {
   std::string normalized = line;
   for (char& c : normalized) {
     if (c == ',') {
@@ -290,7 +293,7 @@ std::optional<std::set<int>> ParseKeyboardAttemptLine(const std::string& line) {
   std::set<int> pitch_classes;
   std::string token;
   while (iss >> token) {
-    const auto maybe_pc = ParseSingleNoteToken(token);
+    const auto maybe_pc = parse_single_note_token(token);
     if (!maybe_pc.has_value()) {
       return std::nullopt;
     }
@@ -303,7 +306,7 @@ std::optional<std::set<int>> ParseKeyboardAttemptLine(const std::string& line) {
   return pitch_classes;
 }
 
-std::optional<std::set<int>> ReadKeyboardAttempt(std::atomic<bool>& running) {
+std::optional<std::set<int>> read_keyboard_attempt(std::atomic<bool>& running) {
   if (!running) {
     return std::nullopt;
   }
@@ -314,25 +317,122 @@ std::optional<std::set<int>> ReadKeyboardAttempt(std::atomic<bool>& running) {
     running = false;
     return std::nullopt;
   }
-  return ParseKeyboardAttemptLine(line);
+  return parse_keyboard_attempt_line(line);
+}
+
+bool write_chord_preview_wav(const std::set<int>& pitch_classes,
+                             const std::string& output_path,
+                             double seconds) {
+  if (pitch_classes.empty()) {
+    return false;
+  }
+
+  constexpr int kSampleRate = 44100;
+  constexpr int kBitsPerSample = 16;
+  constexpr int kNumChannels = 1;
+  const int num_samples = static_cast<int>(kSampleRate * seconds);
+  if (num_samples <= 0) {
+    return false;
+  }
+
+  std::vector<double> freqs_hz;
+  freqs_hz.reserve(pitch_classes.size());
+  for (int pc : pitch_classes) {
+    const int midi_note = 60 + pc;
+    const double frequency = 440.0 * std::pow(2.0, (midi_note - 69) / 12.0);
+    freqs_hz.push_back(frequency);
+  }
+
+  std::vector<int16_t> pcm_samples;
+  pcm_samples.reserve(num_samples);
+  constexpr double kPi = 3.14159265358979323846;
+  for (int i = 0; i < num_samples; ++i) {
+    const double t = static_cast<double>(i) / kSampleRate;
+    double value = 0.0;
+    for (double f : freqs_hz) {
+      value += std::sin(2.0 * kPi * f * t);
+    }
+
+    value /= static_cast<double>(freqs_hz.size());
+
+    const double attack = 0.01;
+    const double release = 0.05;
+    double env = 1.0;
+    if (t < attack) {
+      env = t / attack;
+    } else if (t > seconds - release) {
+      env = std::max(0.0, (seconds - t) / release);
+    }
+    value *= env;
+
+    constexpr double kGain = 0.6;
+    value *= kGain;
+    const int sample = static_cast<int>(std::round(value * 32767.0));
+    const int clamped = std::max(-32768, std::min(32767, sample));
+    pcm_samples.push_back(static_cast<int16_t>(clamped));
+  }
+
+  std::ofstream out(output_path, std::ios::binary);
+  if (!out) {
+    return false;
+  }
+
+  const uint32_t data_size = static_cast<uint32_t>(pcm_samples.size() * sizeof(int16_t));
+  const uint32_t riff_chunk_size = 36 + data_size;
+  const uint16_t audio_format = 1;
+  const uint16_t num_channels = kNumChannels;
+  const uint32_t sample_rate = kSampleRate;
+  const uint16_t bits_per_sample = kBitsPerSample;
+  const uint32_t byte_rate = sample_rate * num_channels * (bits_per_sample / 8);
+  const uint16_t block_align = num_channels * (bits_per_sample / 8);
+  const uint32_t fmt_chunk_size = 16;
+
+  out.write("RIFF", 4);
+  out.write(reinterpret_cast<const char*>(&riff_chunk_size), sizeof(riff_chunk_size));
+  out.write("WAVE", 4);
+
+  out.write("fmt ", 4);
+  out.write(reinterpret_cast<const char*>(&fmt_chunk_size), sizeof(fmt_chunk_size));
+  out.write(reinterpret_cast<const char*>(&audio_format), sizeof(audio_format));
+  out.write(reinterpret_cast<const char*>(&num_channels), sizeof(num_channels));
+  out.write(reinterpret_cast<const char*>(&sample_rate), sizeof(sample_rate));
+  out.write(reinterpret_cast<const char*>(&byte_rate), sizeof(byte_rate));
+  out.write(reinterpret_cast<const char*>(&block_align), sizeof(block_align));
+  out.write(reinterpret_cast<const char*>(&bits_per_sample), sizeof(bits_per_sample));
+
+  out.write("data", 4);
+  out.write(reinterpret_cast<const char*>(&data_size), sizeof(data_size));
+  out.write(reinterpret_cast<const char*>(pcm_samples.data()), data_size);
+
+  return out.good();
+}
+
+void play_chord_preview(const std::set<int>& pitch_classes) {
+  const std::string wav_path = "/tmp/practice_chord_preview.wav";
+  if (!write_chord_preview_wav(pitch_classes, wav_path, 0.5)) {
+    return;
+  }
+  const std::string cmd = "afplay -q 1 " + wav_path;
+  const int rc = std::system(cmd.c_str());
+  (void)rc;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::signal(SIGINT, HandleSignal);
+  std::signal(SIGINT, handle_signal);
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
-      PrintUsage();
+      print_usage();
       return 0;
     }
   }
 
-  const auto maybe_options = ParseOptions(argc, argv);
+  const auto maybe_options = parse_options(argc, argv);
   if (!maybe_options.has_value()) {
-    PrintUsage();
+    print_usage();
     return 1;
   }
   const Options options = *maybe_options;
@@ -351,7 +451,7 @@ int main(int argc, char** argv) {
     }
 
     const OSStatus port_status =
-        MIDIInputPortCreate(client, CFSTR("ChordTrainerIn"), ReadMidiPackets, &midi_state, &input_port);
+      MIDIInputPortCreate(client, CFSTR("ChordTrainerIn"), read_midi_packets, &midi_state, &input_port);
     if (port_status != noErr) {
       std::cerr << "Failed to create MIDI input port (status " << port_status << ")\n";
       MIDIClientDispose(client);
@@ -399,23 +499,24 @@ int main(int argc, char** argv) {
   int rounds = 0;
   while (g_running) {
     if (!options.keyboard_mode) {
-      midi_state.WaitForAllNotesOff(g_running);
+      midi_state.wait_for_all_notes_off(g_running);
       if (!g_running) {
         break;
       }
     }
 
-    ChordQuestion question = NextQuestion(level, rng);
+    ChordQuestion question = next_question(level, rng);
     std::cout << "Play: " << question.name << '\n';
+    play_chord_preview(question.pitch_classes);
 
     const auto start = std::chrono::steady_clock::now();
     bool solved = false;
     while (g_running && !solved) {
       std::optional<std::set<int>> attempt;
       if (options.keyboard_mode) {
-        attempt = ReadKeyboardAttempt(g_running);
+        attempt = read_keyboard_attempt(g_running);
       } else {
-        attempt = midi_state.WaitForAttempt(g_running);
+        attempt = midi_state.wait_for_attempt(g_running);
       }
 
       if (!attempt.has_value()) {
