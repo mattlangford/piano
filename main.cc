@@ -20,6 +20,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/select.h>
 #include <thread>
 #include <unistd.h>
@@ -172,8 +173,19 @@ std::vector<ChordPattern> patterns_for_level(int level) {
 }
 
 ChordQuestion next_question(int level, std::mt19937& rng) {
-  static const std::array<std::string, 12> kRootNames = {
-      "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+  static const std::array<std::vector<std::string_view>, 12> kRootNames = {
+      std::vector<std::string_view>{"C"},
+      std::vector<std::string_view>{"C#", "Db"},
+      std::vector<std::string_view>{"D"},
+      std::vector<std::string_view>{"D#", "Eb"},
+      std::vector<std::string_view>{"E"},
+      std::vector<std::string_view>{"F"},
+      std::vector<std::string_view>{"F#", "Gb"},
+      std::vector<std::string_view>{"G"},
+      std::vector<std::string_view>{"G#", "Ab"},
+      std::vector<std::string_view>{"A"},
+      std::vector<std::string_view>{"A#", "Bb"},
+      std::vector<std::string_view>{"B"},
   };
 
   const auto patterns = patterns_for_level(level);
@@ -182,6 +194,9 @@ ChordQuestion next_question(int level, std::mt19937& rng) {
   std::uniform_int_distribution<std::size_t> pattern_dist(0, patterns.size() - 1);
 
   const int root = root_dist(rng);
+  const std::vector<std::string_view>& root_name_choices = kRootNames[root];
+  std::uniform_int_distribution<std::size_t> root_name_dist(0, root_name_choices.size() - 1);
+  const std::string_view root_name = root_name_choices[root_name_dist(rng)];
   const ChordPattern& pattern = patterns[pattern_dist(rng)];
 
   std::set<int> target;
@@ -199,7 +214,7 @@ ChordQuestion next_question(int level, std::mt19937& rng) {
   tuple += ")";
 
   return {
-      .name = kRootNames[root] + pattern.suffix,
+      .name = std::string(root_name) + pattern.suffix,
       .pitch_classes = target,
       .semitone_tuple = tuple,
   };
@@ -212,7 +227,7 @@ void print_usage() {
 std::optional<Options> parse_options(int argc, char** argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
-    const std::string arg = argv[i];
+    const std::string_view arg = argv[i];
     if (arg == "--level") {
       if (i + 1 >= argc) {
         return std::nullopt;
@@ -249,7 +264,7 @@ int normalize_pitch_class(int semitone) {
   return normalized;
 }
 
-std::optional<int> parse_single_note_token(const std::string& token) {
+std::optional<int> parse_single_note_token(std::string_view token) {
   if (token.empty()) {
     return std::nullopt;
   }
