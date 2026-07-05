@@ -2,6 +2,36 @@
 
 A terminal-based MIDI ear/shape practice app.
 
+## Example
+
+```text
+$ bazel run //:practice -- --level 2 --keyboard --log
+Chord Trainer (level 2)
+Keyboard mode: type notes like C E G or F# A# C#. Ctrl+C to quit.
+
+History logging enabled: /Users/you/Documents/code/piano/.history.csv
+Play: Dmaj7
+Notes> D F# A C#
+Correct in 3.42s
+
+Play: C7
+Notes> C E G B
+Incorrect. Semitone tuple: (0, 4, 7, 10). Try again.
+Notes> C E G Bb
+Correct in 11.08s
+
+^C
+Session ended after 2 chords.
+Score: 2
+Average time to respond: 7.25s
+Accuracy: 66.7%
+Chord breakdown (sorted by wrong %):
+	Chord | Attempts | Wrong % | Accuracy | Wrong |      Avg
+	----- | -------- | ------- | -------- | ----- | --------
+	C7    |        2 |   50.0% |    50.0% |     1 |   11.08s
+	Dmaj7 |        1 |    0.0% |   100.0% |     0 |    3.42s
+```
+
 ## Features
 
 - Random chord prompts by level
@@ -11,6 +41,7 @@ A terminal-based MIDI ear/shape practice app.
 - Adaptive weighting and stats tracked per exact chord name
 - Prevents immediate back-to-back repeats of the same prompted chord
 - Continuous rounds until Ctrl+C
+
 
 ## Levels
 
@@ -92,6 +123,7 @@ You can combine it with keyboard mode for terminal-only input:
 ```bash
 bazel run //:practice -- --analyze --keyboard
 ```
+
 
 ## Notes
 

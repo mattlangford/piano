@@ -301,28 +301,51 @@ void print_chord_breakdown(const std::unordered_map<std::string, CategoryStats>&
   }
 
   std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
-    return question_weight(a.second) > question_weight(b.second);
+    const int a_attempts = a.second.correct + a.second.wrong_attempts;
+    const int b_attempts = b.second.correct + b.second.wrong_attempts;
+    const double a_wrong_pct =
+        (a_attempts > 0)
+            ? (100.0 * static_cast<double>(a.second.wrong_attempts) / a_attempts)
+            : 0.0;
+    const double b_wrong_pct =
+        (b_attempts > 0)
+            ? (100.0 * static_cast<double>(b.second.wrong_attempts) / b_attempts)
+            : 0.0;
+    if (a_wrong_pct != b_wrong_pct) {
+      return a_wrong_pct > b_wrong_pct;
+    }
+    return a.first < b.first;
   });
 
-  std::cout << "Chord breakdown (weaker to stronger):\n";
+  std::cout << "Chord breakdown (sorted by wrong %):\n";
   std::size_t max_chord_width = std::string("Chord").size();
   for (const auto& [chord, _] : rows) {
     max_chord_width = std::max(max_chord_width, chord.size());
   }
   const int chord_width = static_cast<int>(max_chord_width);
+  constexpr int kAttemptsWidth = 8;
+  constexpr int kWrongPctWidth = 7;
   constexpr int kAccuracyWidth = 8;
   constexpr int kWrongWidth = 5;
   constexpr int kAvgWidth = 8;
   std::cout << "  " << std::left << std::setw(chord_width) << "Chord"
+            << " | " << std::right << std::setw(kAttemptsWidth) << "Attempts"
+            << " | " << std::setw(kWrongPctWidth) << "Wrong %"
             << " | " << std::right << std::setw(kAccuracyWidth) << "Accuracy"
             << " | " << std::setw(kWrongWidth) << "Wrong"
             << " | " << std::setw(kAvgWidth) << "Avg" << "\n";
   std::cout << "  " << std::string(max_chord_width, '-')
+            << " | " << std::string(kAttemptsWidth, '-')
+            << " | " << std::string(kWrongPctWidth, '-')
             << " | " << std::string(kAccuracyWidth, '-')
             << " | " << std::string(kWrongWidth, '-')
             << " | " << std::string(kAvgWidth, '-') << "\n";
   for (const auto& [chord, stats] : rows) {
     const int total_attempts = stats.correct + stats.wrong_attempts;
+    const double wrong_pct =
+      (total_attempts > 0)
+        ? (100.0 * static_cast<double>(stats.wrong_attempts) / total_attempts)
+        : 0.0;
     const double accuracy =
       (total_attempts > 0)
         ? (100.0 * static_cast<double>(stats.correct) / total_attempts)
@@ -338,6 +361,9 @@ void print_chord_breakdown(const std::unordered_map<std::string, CategoryStats>&
       avg_cell << "n/a";
     }
     std::cout << "  " << std::left << std::setw(chord_width) << chord
+              << " | " << std::right << std::setw(kAttemptsWidth) << total_attempts
+              << " | " << std::setw(kWrongPctWidth - 1) << std::fixed << std::setprecision(1)
+              << wrong_pct << "%"
               << " | " << std::right << std::setw(kAccuracyWidth - 1)
               << std::fixed << std::setprecision(1)
               << accuracy << "%"
