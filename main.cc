@@ -60,6 +60,7 @@ struct Options {
   int level = 1;
   bool keyboard_mode = false;
   bool quiet_mode = false;
+  bool analyze_mode = false;
 };
 
 class MidiState {
@@ -341,7 +342,7 @@ void print_category_breakdown(const std::unordered_map<std::string, CategoryStat
 }
 
 void print_usage() {
-  std::cerr << "Usage: bazel run //:practice -- [--level 1-3] [--keyboard] [--quiet]\n";
+  std::cerr << "Usage: bazel run //:practice -- [--level 1-3] [--keyboard] [--quiet] [--analyze]\n";
 }
 
 std::optional<Options> parse_options(int argc, char** argv) {
@@ -371,9 +372,82 @@ std::optional<Options> parse_options(int argc, char** argv) {
       options.quiet_mode = true;
       continue;
     }
+    if (arg == "--analyze") {
+      options.analyze_mode = true;
+      continue;
+    }
     return std::nullopt;
   }
   return options;
+}
+
+std::string pitch_class_name(int pitch_class) {
+  static const std::array<const char*, 12> kNames = {
+      "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B",
+  };
+  int normalized = pitch_class % 12;
+  if (normalized < 0) {
+    normalized += 12;
+  }
+  return kNames[normalized];
+}
+
+std::string format_pitch_classes(const std::set<int>& pitch_classes) {
+  std::string out;
+  bool first = true;
+  for (int pitch_class : pitch_classes) {
+    if (!first) {
+      out += " ";
+    }
+    first = false;
+    out += pitch_class_name(pitch_class);
+  }
+  return out;
+}
+
+std::vector<std::string> analyze_chord_names(const std::set<int>& pitch_classes) {
+  if (pitch_classes.empty()) {
+    return {};
+  }
+
+  static const std::array<std::vector<std::string_view>, 12> kRootNames = {
+      std::vector<std::string_view>{"C"},
+      std::vector<std::string_view>{"C#", "Db"},
+      std::vector<std::string_view>{"D"},
+      std::vector<std::string_view>{"D#", "Eb"},
+      std::vector<std::string_view>{"E"},
+      std::vector<std::string_view>{"F"},
+      std::vector<std::string_view>{"F#", "Gb"},
+      std::vector<std::string_view>{"G"},
+      std::vector<std::string_view>{"G#", "Ab"},
+      std::vector<std::string_view>{"A"},
+      std::vector<std::string_view>{"A#", "Bb"},
+      std::vector<std::string_view>{"B"},
+  };
+
+  const std::vector<ChordPattern> patterns = patterns_for_level(3);
+  std::vector<std::string> matches;
+  std::set<std::string> seen;
+
+  for (int root = 0; root < 12; ++root) {
+    for (const ChordPattern& pattern : patterns) {
+      std::set<int> target;
+      for (int interval : pattern.intervals) {
+        target.insert((root + interval) % 12);
+      }
+      if (target != pitch_classes) {
+        continue;
+      }
+      for (std::string_view root_name : kRootNames[root]) {
+        const std::string name = std::string(root_name) + pattern.suffix;
+        if (seen.insert(name).second) {
+          matches.push_back(name);
+        }
+      }
+    }
+  }
+
+  return matches;
 }
 
 int normalize_pitch_class(int semitone) {
@@ -671,6 +745,47 @@ int main(int argc, char** argv) {
   }
   if (options.quiet_mode) {
     std::cout << "Quiet mode enabled: chord preview audio is off.\n\n";
+  }
+
+  if (options.analyze_mode) {
+    std::cout << "Analyze mode: play chords and this tool will print what it hears. Ctrl+C to quit.\n";
+    while (g_running) {
+      std::optional<std::set<int>> attempt;
+      if (options.keyboard_mode) {
+        attempt = read_keyboard_attempt(g_running);
+      } else {
+        attempt = midi_state.wait_for_attempt(g_running);
+      }
+
+      if (!attempt.has_value()) {
+        if (options.keyboard_mode && g_running) {
+          std::cout << "Invalid input. Use note names like C E G or Bb D F.\n";
+          continue;
+        }
+        break;
+      }
+
+      const std::vector<std::string> matches = analyze_chord_names(*attempt);
+      std::cout << "Heard: " << format_pitch_classes(*attempt);
+      if (matches.empty()) {
+        std::cout << " -> (no chord match in trainer set)\n";
+      } else {
+        std::cout << " -> ";
+        for (std::size_t i = 0; i < matches.size(); ++i) {
+          if (i > 0) {
+            std::cout << ", ";
+          }
+          std::cout << matches[i];
+        }
+        std::cout << "\n";
+      }
+    }
+
+    if (!options.keyboard_mode) {
+      MIDIPortDispose(input_port);
+      MIDIClientDispose(client);
+    }
+    return 0;
   }
 
   std::random_device rd;

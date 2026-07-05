@@ -59,9 +59,24 @@ Type note names per attempt (space separated), for example:
 
 If you get a chord wrong, the app prints the target semitone tuple and asks again.
 
+## Analyze Mode
+
+Use analyze mode to print detected chords continuously instead of running prompts:
+
+```bash
+bazel run //:practice -- --analyze
+```
+
+You can combine it with keyboard mode for terminal-only input:
+
+```bash
+bazel run //:practice -- --analyze --keyboard
+```
+
 ## Notes
 
 - Requires macOS CoreMIDI and an available MIDI input source.
 - `--keyboard` bypasses CoreMIDI and uses typed note names instead.
 - `--quiet` disables the audible chord preview.
+- `--analyze` prints detected chord names and note content for each chord you play.
 - The trainer waits until all keys are released before issuing the next prompt.
