@@ -8,6 +8,8 @@ A terminal-based MIDI ear/shape practice app.
 - MIDI input listening via CoreMIDI (MacOS Only)
 - Exact chord matching by pitch class
 - Reports correctness and response time
+- Adaptive weighting and stats tracked per exact chord name
+- Prevents immediate back-to-back repeats of the same prompted chord
 - Continuous rounds until Ctrl+C
 
 ## Levels
@@ -35,6 +37,24 @@ Disable audio preview if needed:
 
 ```bash
 bazel run //:practice -- --level 1 --quiet
+```
+
+Enable per-question CSV history logging (opt-in):
+
+```bash
+bazel run //:practice -- --level 1 --log
+```
+
+Use a custom output path if you want to store logs elsewhere:
+
+```bash
+bazel run //:practice -- --level 1 --log session_logs/my_practice.csv
+```
+
+Equivalent form:
+
+```bash
+bazel run //:practice -- --level 1 --log=session_logs/my_practice.csv
 ```
 
 ## Terminal-Only Testing
@@ -79,4 +99,7 @@ bazel run //:practice -- --analyze --keyboard
 - `--keyboard` bypasses CoreMIDI and uses typed note names instead.
 - `--quiet` disables the audible chord preview.
 - `--analyze` prints detected chord names and note content for each chord you play.
+- `--log` appends practice results to CSV (chord name, correctness, and seconds to solve).
+- `--log` without a path writes to `.history.csv`.
+- `--log <path>` writes to the path you provide.
 - The trainer waits until all keys are released before issuing the next prompt.

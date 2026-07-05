@@ -21,6 +21,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <ctime>
 #include <sys/select.h>
 #include <thread>
 #include <unordered_map>
@@ -45,8 +46,6 @@ struct ChordQuestion {
   std::string name;
   std::set<int> pitch_classes;
   std::string semitone_tuple;
-  std::string quality_tag;
-  std::string accidental_tag;
 };
 
 struct CategoryStats {
@@ -61,6 +60,8 @@ struct Options {
   bool keyboard_mode = false;
   bool quiet_mode = false;
   bool analyze_mode = false;
+  bool log_history = false;
+  std::string log_path = ".history.csv";
 };
 
 class MidiState {
@@ -183,7 +184,7 @@ std::vector<ChordPattern> patterns_for_level(int level) {
   return patterns;
 }
 
-double category_weight(const CategoryStats& stats) {
+double question_weight(const CategoryStats& stats) {
   if (stats.asked == 0) {
     return 1.0;
   }
@@ -196,26 +197,7 @@ double category_weight(const CategoryStats& stats) {
   return 1.0 + (2.0 * error_rate) + slow_penalty;
 }
 
-std::string quality_label(std::string_view suffix) {
-  if (suffix.empty()) {
-    return "maj";
-  }
-  return std::string(suffix);
-}
-
-std::string accidental_label(std::string_view root_name) {
-  if (root_name.find('b') != std::string_view::npos) {
-    return "flat";
-  }
-  if (root_name.find('#') != std::string_view::npos) {
-    return "sharp";
-  }
-  return "natural";
-}
-
-ChordQuestion next_question(int level,
-                           std::mt19937& rng,
-                           const std::unordered_map<std::string, CategoryStats>& stats_by_tag) {
+std::vector<ChordQuestion> all_questions_for_level(int level) {
   static const std::array<std::vector<std::string_view>, 12> kRootNames = {
       std::vector<std::string_view>{"C"},
       std::vector<std::string_view>{"C#", "Db"},
@@ -233,82 +215,84 @@ ChordQuestion next_question(int level,
 
   const auto patterns = patterns_for_level(level);
 
-  std::uniform_int_distribution<int> root_dist(0, 11);
+  std::vector<ChordQuestion> questions;
+  questions.reserve(12 * patterns.size() * 2);
 
-  std::vector<double> pattern_weights;
-  pattern_weights.reserve(patterns.size());
-  for (const ChordPattern& pattern : patterns) {
-    const std::string tag = "quality:" + quality_label(pattern.suffix);
-    const auto it = stats_by_tag.find(tag);
-    const double w = (it == stats_by_tag.end()) ? 1.0 : category_weight(it->second);
-    pattern_weights.push_back(w);
-  }
-  std::discrete_distribution<std::size_t> pattern_dist(pattern_weights.begin(), pattern_weights.end());
+  for (int root = 0; root < 12; ++root) {
+    const std::vector<std::string_view>& root_name_choices = kRootNames[root];
+    for (const ChordPattern& pattern : patterns) {
+      std::set<int> target;
+      for (int interval : pattern.intervals) {
+        target.insert((root + interval) % 12);
+      }
 
-  const int root = root_dist(rng);
-  const std::vector<std::string_view>& root_name_choices = kRootNames[root];
-  std::vector<double> root_name_weights;
-  root_name_weights.reserve(root_name_choices.size());
-  for (std::string_view name_choice : root_name_choices) {
-    const std::string tag = "accidental:" + accidental_label(name_choice);
-    const auto it = stats_by_tag.find(tag);
-    const double w = (it == stats_by_tag.end()) ? 1.0 : category_weight(it->second);
-    root_name_weights.push_back(w);
-  }
-  std::discrete_distribution<std::size_t> root_name_dist(
-      root_name_weights.begin(), root_name_weights.end());
+      std::string tuple = "(";
+      for (std::size_t i = 0; i < pattern.intervals.size(); ++i) {
+        tuple += std::to_string(pattern.intervals[i]);
+        if (i + 1 != pattern.intervals.size()) {
+          tuple += ", ";
+        }
+      }
+      tuple += ")";
 
-  const std::string_view root_name = root_name_choices[root_name_dist(rng)];
-  const ChordPattern& pattern = patterns[pattern_dist(rng)];
-  const std::string quality_tag = "quality:" + quality_label(pattern.suffix);
-  const std::string accidental_tag = "accidental:" + accidental_label(root_name);
-
-  std::set<int> target;
-  for (int interval : pattern.intervals) {
-    target.insert((root + interval) % 12);
-  }
-
-  std::string tuple = "(";
-  for (std::size_t i = 0; i < pattern.intervals.size(); ++i) {
-    tuple += std::to_string(pattern.intervals[i]);
-    if (i + 1 != pattern.intervals.size()) {
-      tuple += ", ";
+      for (std::string_view root_name : root_name_choices) {
+        questions.push_back({
+            .name = std::string(root_name) + pattern.suffix,
+            .pitch_classes = target,
+            .semitone_tuple = tuple,
+        });
+      }
     }
   }
-  tuple += ")";
 
-  return {
-      .name = std::string(root_name) + pattern.suffix,
-      .pitch_classes = target,
-      .semitone_tuple = tuple,
-      .quality_tag = quality_tag,
-      .accidental_tag = accidental_tag,
-  };
+  return questions;
 }
 
-void update_question_stats(std::unordered_map<std::string, CategoryStats>& stats_by_tag,
+ChordQuestion next_question(int level,
+                           std::mt19937& rng,
+                           const std::unordered_map<std::string, CategoryStats>& stats_by_chord,
+                           const std::optional<std::string>& last_question_name) {
+  std::vector<ChordQuestion> questions = all_questions_for_level(level);
+
+  if (last_question_name.has_value() && questions.size() > 1) {
+    questions.erase(
+        std::remove_if(questions.begin(),
+                       questions.end(),
+                       [&](const ChordQuestion& q) { return q.name == *last_question_name; }),
+        questions.end());
+  }
+
+  std::vector<double> weights;
+  weights.reserve(questions.size());
+  for (const ChordQuestion& question : questions) {
+    const auto it = stats_by_chord.find(question.name);
+    const double w = (it == stats_by_chord.end()) ? 1.0 : question_weight(it->second);
+    weights.push_back(w);
+  }
+  std::discrete_distribution<std::size_t> dist(weights.begin(), weights.end());
+  return questions[dist(rng)];
+}
+
+void update_question_stats(std::unordered_map<std::string, CategoryStats>& stats_by_chord,
                           const ChordQuestion& question,
                           bool solved,
                           int wrong_attempts,
                           long long elapsed_ms) {
-  const std::array<std::string, 2> tags = {question.quality_tag, question.accidental_tag};
-  for (const std::string& tag : tags) {
-    CategoryStats& stats = stats_by_tag[tag];
-    stats.asked += 1;
-    stats.wrong_attempts += wrong_attempts;
-    if (solved) {
-      stats.correct += 1;
-      stats.total_response_ms += elapsed_ms;
-    }
+  CategoryStats& stats = stats_by_chord[question.name];
+  stats.asked += 1;
+  stats.wrong_attempts += wrong_attempts;
+  if (solved) {
+    stats.correct += 1;
+    stats.total_response_ms += elapsed_ms;
   }
 }
 
-void print_category_breakdown(const std::unordered_map<std::string, CategoryStats>& stats_by_tag) {
+void print_chord_breakdown(const std::unordered_map<std::string, CategoryStats>& stats_by_chord) {
   std::vector<std::pair<std::string, CategoryStats>> rows;
-  rows.reserve(stats_by_tag.size());
-  for (const auto& [tag, stats] : stats_by_tag) {
+  rows.reserve(stats_by_chord.size());
+  for (const auto& [chord, stats] : stats_by_chord) {
     if (stats.asked > 0) {
-      rows.push_back({tag, stats});
+      rows.push_back({chord, stats});
     }
   }
 
@@ -317,11 +301,11 @@ void print_category_breakdown(const std::unordered_map<std::string, CategoryStat
   }
 
   std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
-    return category_weight(a.second) > category_weight(b.second);
+    return question_weight(a.second) > question_weight(b.second);
   });
 
-  std::cout << "Category breakdown (weaker to stronger):\n";
-  for (const auto& [tag, stats] : rows) {
+  std::cout << "Chord breakdown (weaker to stronger):\n";
+  for (const auto& [chord, stats] : rows) {
     const int total_attempts = stats.correct + stats.wrong_attempts;
     const double accuracy =
       (total_attempts > 0)
@@ -331,7 +315,7 @@ void print_category_breakdown(const std::unordered_map<std::string, CategoryStat
         (stats.correct > 0)
             ? (static_cast<double>(stats.total_response_ms) / stats.correct) / 1000.0
             : 0.0;
-    std::cout << "  " << tag << " | attempt accuracy " << std::fixed << std::setprecision(1)
+    std::cout << "  " << chord << " | attempt accuracy " << std::fixed << std::setprecision(1)
               << accuracy << "%"
               << ", wrong attempts " << stats.wrong_attempts;
     if (stats.correct > 0) {
@@ -341,8 +325,98 @@ void print_category_breakdown(const std::unordered_map<std::string, CategoryStat
   }
 }
 
+std::string csv_escape(std::string_view text) {
+  std::string escaped;
+  escaped.reserve(text.size() + 2);
+  escaped.push_back('"');
+  for (char c : text) {
+    if (c == '"') {
+      escaped += "\"\"";
+    } else {
+      escaped.push_back(c);
+    }
+  }
+  escaped.push_back('"');
+  return escaped;
+}
+
+std::string resolve_log_path(std::string_view requested_path) {
+  const std::string path = std::string(requested_path);
+  if (path.empty() || path[0] == '/') {
+    return path;
+  }
+
+  const char* base = std::getenv("BUILD_WORKING_DIRECTORY");
+  if (base == nullptr || *base == '\0') {
+    base = std::getenv("PWD");
+  }
+  if (base == nullptr || *base == '\0') {
+    return path;
+  }
+
+  std::string resolved(base);
+  if (!resolved.empty() && resolved.back() != '/') {
+    resolved.push_back('/');
+  }
+  resolved += path;
+  return resolved;
+}
+
+std::ofstream open_history_file(std::string_view history_path) {
+  bool file_exists = false;
+  {
+    std::ifstream in{std::string(history_path)};
+    file_exists = static_cast<bool>(in);
+  }
+
+  std::ofstream out(std::string(history_path), std::ios::app);
+  if (!out) {
+    return out;
+  }
+
+  if (!file_exists) {
+    out << "timestamp,chord_name,got_right,seconds_to_right\n";
+  }
+  return out;
+}
+
+std::string current_timestamp_local() {
+  const auto now = std::chrono::system_clock::now();
+  const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+
+  std::tm local_tm{};
+  if (localtime_r(&now_time, &local_tm) == nullptr) {
+    return "";
+  }
+
+  char buffer[20] = {};
+  if (std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &local_tm) == 0) {
+    return "";
+  }
+  return std::string(buffer);
+}
+
+void write_history_row(std::ofstream& out,
+                       const ChordQuestion& question,
+                       bool solved,
+                       long long elapsed_ms) {
+  if (!out) {
+    return;
+  }
+
+  const std::string timestamp = current_timestamp_local();
+  out << csv_escape(timestamp) << ","
+      << csv_escape(question.name) << "," << (solved ? "true" : "false") << ",";
+  if (solved) {
+    out << std::fixed << std::setprecision(3)
+        << (static_cast<double>(elapsed_ms) / 1000.0);
+  }
+  out << "\n";
+  out.flush();
+}
+
 void print_usage() {
-  std::cerr << "Usage: bazel run //:practice -- [--level 1-3] [--keyboard] [--quiet] [--analyze]\n";
+  std::cerr << "Usage: bazel run //:practice -- [--level 1-3] [--keyboard] [--quiet] [--analyze] [--log[=path]]\n";
 }
 
 std::optional<Options> parse_options(int argc, char** argv) {
@@ -374,6 +448,26 @@ std::optional<Options> parse_options(int argc, char** argv) {
     }
     if (arg == "--analyze") {
       options.analyze_mode = true;
+      continue;
+    }
+    if (arg.rfind("--log=", 0) == 0) {
+      options.log_history = true;
+      const std::string value = std::string(arg.substr(6));
+      if (value.empty()) {
+        return std::nullopt;
+      }
+      options.log_path = value;
+      continue;
+    }
+    if (arg == "--log") {
+      options.log_history = true;
+      if (i + 1 < argc) {
+        const std::string_view next = argv[i + 1];
+        if (!next.empty() && next[0] != '-') {
+          options.log_path = std::string(next);
+          ++i;
+        }
+      }
       continue;
     }
     return std::nullopt;
@@ -747,6 +841,19 @@ int main(int argc, char** argv) {
     std::cout << "Quiet mode enabled: chord preview audio is off.\n\n";
   }
 
+  std::ofstream history_file;
+  std::string resolved_log_path;
+  if (options.log_history) {
+    resolved_log_path = resolve_log_path(options.log_path);
+    history_file = open_history_file(resolved_log_path);
+    if (!history_file) {
+      std::cerr << "Warning: unable to open " << resolved_log_path
+                << " for writing. Continuing without history logging.\n";
+    } else {
+      std::cout << "History logging enabled: " << resolved_log_path << "\n";
+    }
+  }
+
   if (options.analyze_mode) {
     std::cout << "Analyze mode: play chords and this tool will print what it hears. Ctrl+C to quit.\n";
     while (g_running) {
@@ -794,7 +901,8 @@ int main(int argc, char** argv) {
   int rounds = 0;
   int total_attempts = 0;
   long long total_response_ms = 0;
-  std::unordered_map<std::string, CategoryStats> stats_by_tag;
+  std::unordered_map<std::string, CategoryStats> stats_by_chord;
+  std::optional<std::string> last_question_name;
   while (g_running) {
     if (!options.keyboard_mode) {
       midi_state.wait_for_all_notes_off(g_running);
@@ -803,7 +911,8 @@ int main(int argc, char** argv) {
       }
     }
 
-    ChordQuestion question = next_question(level, rng, stats_by_tag);
+    ChordQuestion question = next_question(level, rng, stats_by_chord, last_question_name);
+    last_question_name = question.name;
     std::cout << "Play: " << question.name << '\n';
     if (!options.quiet_mode) {
       play_chord_preview(question.pitch_classes);
@@ -845,7 +954,8 @@ int main(int argc, char** argv) {
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    update_question_stats(stats_by_tag, question, solved, question_wrong_attempts, elapsed);
+    write_history_row(history_file, question, solved, elapsed);
+    update_question_stats(stats_by_chord, question, solved, question_wrong_attempts, elapsed);
 
     if (!g_running || !solved) {
       break;
@@ -871,7 +981,7 @@ int main(int argc, char** argv) {
     std::cout << "Accuracy: " << std::fixed << std::setprecision(1)
               << accuracy_pct << "%\n";
   }
-  print_category_breakdown(stats_by_tag);
+  print_chord_breakdown(stats_by_chord);
 
   if (!options.keyboard_mode) {
     MIDIPortDispose(input_port);
