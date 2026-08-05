@@ -16,9 +16,14 @@ void Input::set_error(std::string* error, const std::string& message) const {
   }
 }
 
-bool Input::start(NoteHandler handler, std::string* error) {
+bool Input::start(NoteHandler handler,
+                  std::string* error,
+                  ControlHandler control_handler,
+                  int midi_channel) {
   stop();
   handler_ = std::move(handler);
+  control_handler_ = std::move(control_handler);
+  midi_channel_ = midi_channel;
 
   OSStatus status = MIDIClientCreate(CFSTR("PianoMidiClient"), nullptr, nullptr, &client_);
   if (status != noErr) {
@@ -67,6 +72,8 @@ void Input::stop() {
     client_ = 0;
   }
   handler_ = nullptr;
+  control_handler_ = nullptr;
+  midi_channel_ = 0;
 }
 
 void Input::read_packets(const MIDIPacketList* packet_list,
@@ -76,7 +83,7 @@ void Input::read_packets(const MIDIPacketList* packet_list,
 }
 
 void Input::handle_packets(const MIDIPacketList* packet_list) {
-  if (!handler_) {
+  if (!handler_ && !control_handler_) {
     return;
   }
 
@@ -105,6 +112,26 @@ void Input::handle_packets(const MIDIPacketList* packet_list) {
       }
 
       const std::uint8_t status = running_status & 0xf0;
+      if (midi_channel_ != 0 &&
+          static_cast<int>((running_status & 0x0f) + 1) != midi_channel_) {
+        const std::size_t data_bytes = (status == 0xc0 || status == 0xd0) ? 1 : 2;
+        index = std::min<std::size_t>(packet->length, index + data_bytes);
+        continue;
+      }
+      if (index >= packet->length) {
+        break;
+      }
+      if (status == 0xb0) {
+        if (index + 1 >= packet->length) {
+          break;
+        }
+        const int controller = packet->data[index++];
+        const int value = packet->data[index++];
+        if (control_handler_) {
+          control_handler_(controller, value);
+        }
+        continue;
+      }
       if (status != 0x80 && status != 0x90) {
         const std::size_t data_bytes = (status == 0xc0 || status == 0xd0) ? 1 : 2;
         index = std::min<std::size_t>(packet->length, index + data_bytes);
@@ -115,7 +142,9 @@ void Input::handle_packets(const MIDIPacketList* packet_list) {
       }
       const int note = packet->data[index++];
       const int velocity = packet->data[index++];
-      handler_(note, velocity, status == 0x90 && velocity != 0);
+      if (handler_) {
+        handler_(note, velocity, status == 0x90 && velocity != 0);
+      }
     }
     packet = MIDIPacketNext(packet);
   }

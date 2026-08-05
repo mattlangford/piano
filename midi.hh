@@ -14,13 +14,17 @@ namespace midi {
 class Input {
  public:
   using NoteHandler = std::function<void(int note, int velocity, bool note_on)>;
+  using ControlHandler = std::function<void(int controller, int value)>;
 
   Input() = default;
   Input(const Input&) = delete;
   Input& operator=(const Input&) = delete;
   ~Input();
 
-  bool start(NoteHandler handler, std::string* error = nullptr);
+  bool start(NoteHandler handler,
+             std::string* error = nullptr,
+             ControlHandler control_handler = nullptr,
+             int midi_channel = 0);
   void stop();
 
  private:
@@ -33,6 +37,8 @@ class Input {
   MIDIClientRef client_ = 0;
   MIDIPortRef input_port_ = 0;
   NoteHandler handler_;
+  ControlHandler control_handler_;
+  int midi_channel_ = 0;
 };
 
 }  // namespace midi

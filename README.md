@@ -133,6 +133,39 @@ The `synth` target currently generates a triangle-wave voice for each MIDI note:
 bazel run //synth:sample_synth
 ```
 
+The synth has defaults for every option. By default it uses a continuously
+synthesized triangle, uses MIDI note 60 as the root, and listens on all MIDI
+channels. Each `--sample` adds one equal keyboard zone; the 128 MIDI notes are
+divided into those zones in the order provided. Comma-separated values within
+one `--sample` are random alternates for that zone:
+
+```bash
+bazel run //synth:sample_synth -- \
+  --sample bass.mp3 \
+  --sample piano.mp3 \
+  --sample triangle,square \
+  --root-note 60 \
+  --channel 1
+```
+
+With three samples, notes 0-42 use `bass.mp3`, 43-85 use `piano.mp3`, and
+86-127 randomly use the synthesized triangle or square wave. Built-in
+waveforms can be selected with `triangle`, `square`, or `sine`/`sin`. For
+example, `--sample triangle,square` randomly chooses one for each note in that
+zone. Each zone after the first is
+transposed one octave down, so C4 in the upper/second zone maps to C3. Holding
+a key does not change pitch or playback speed. Releasing a key while
+the sustain pedal is down lets a file clip continue until its buffer ends;
+releasing the pedal early stops the dry source and leaves its reverb tail. The
+active voices sustain while the pedal is held.
+
+Run `bazel run //synth:sample_synth -- --help` for all options. A positional
+sample path is also accepted.
+
+Synthesized waveforms and decoded files are peak-normalized to make square,
+triangle, sine, and recorded clips play at more comparable levels. A little
+headroom is retained for overlapping notes and reverb.
+
 It connects to all available CoreMIDI input sources, uses MIDI note frequency
 (A4/MIDI 69 = 440 Hz), responds to velocity, supports overlapping notes, and
 releases voices when notes are released. The audio is generated in real time;
