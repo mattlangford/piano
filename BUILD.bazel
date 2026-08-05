@@ -1,7 +1,7 @@
 cc_library(
     name = "midi",
-    srcs = ["midi_input.cc"],
-    hdrs = ["midi_input.hh"],
+    srcs = ["midi.cc"],
+    hdrs = ["midi.hh"],
     visibility = ["//visibility:public"],
     copts = ["-std=c++20"],
     linkopts = [

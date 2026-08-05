@@ -2,3 +2,5 @@ module(
     name = "piano",
     version = "0.1.0",
 )
+
+bazel_dep(name = "apple_support", version = "2.8.0")
