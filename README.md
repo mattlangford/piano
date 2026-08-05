@@ -125,6 +125,19 @@ bazel run //tutor:practice -- --analyze --keyboard
 ```
 
 
+## Triangle Synth
+
+The `synth` target currently generates a triangle-wave voice for each MIDI note:
+
+```bash
+bazel run //synth:sample_synth
+```
+
+It connects to all available CoreMIDI input sources, uses MIDI note frequency
+(A4/MIDI 69 = 440 Hz), responds to velocity, supports overlapping notes, and
+releases voices when notes are released. The audio is generated in real time;
+no sample file is required.
+
 ## Notes
 
 - Requires macOS CoreMIDI and an available MIDI input source.
