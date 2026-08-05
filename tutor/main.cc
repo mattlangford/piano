@@ -463,7 +463,7 @@ void write_history_row(std::ofstream& out,
 }
 
 void print_usage() {
-  std::cerr << "Usage: bazel run //:practice -- [--level 1-3] [--keyboard] [--quiet] [--analyze] [--log[=path]]\n";
+  std::cerr << "Usage: bazel run //tutor:practice -- [--level 1-3] [--keyboard] [--quiet] [--analyze] [--log[=path]]\n";
 }
 
 std::optional<Options> parse_options(int argc, char** argv) {

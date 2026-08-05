@@ -5,7 +5,7 @@ A terminal-based MIDI ear/shape practice app.
 ## Example
 
 ```text
-$ bazel run //:practice -- --level 2 --keyboard --log
+$ bazel run //tutor:practice -- --level 2 --keyboard --log
 Chord Trainer (level 2)
 Keyboard mode: type notes like C E G or F# A# C#. Ctrl+C to quit.
 
@@ -53,13 +53,13 @@ Chord breakdown (sorted by wrong %):
 
 ```bash
 cd piano
-bazel build //:practice
+bazel build //tutor:practice
 ```
 
 ## Run
 
 ```bash
-bazel run //:practice -- --level 1
+bazel run //tutor:practice -- --level 1
 ```
 
 Replace `1` with `2` or `3` for harder levels.
@@ -67,25 +67,25 @@ Replace `1` with `2` or `3` for harder levels.
 Disable audio preview if needed:
 
 ```bash
-bazel run //:practice -- --level 1 --quiet
+bazel run //tutor:practice -- --level 1 --quiet
 ```
 
 Enable per-question CSV history logging (opt-in):
 
 ```bash
-bazel run //:practice -- --level 1 --log
+bazel run //tutor:practice -- --level 1 --log
 ```
 
 Use a custom output path if you want to store logs elsewhere:
 
 ```bash
-bazel run //:practice -- --level 1 --log session_logs/my_practice.csv
+bazel run //tutor:practice -- --level 1 --log session_logs/my_practice.csv
 ```
 
 Equivalent form:
 
 ```bash
-bazel run //:practice -- --level 1 --log=session_logs/my_practice.csv
+bazel run //tutor:practice -- --level 1 --log=session_logs/my_practice.csv
 ```
 
 ## Terminal-Only Testing
@@ -93,13 +93,13 @@ bazel run //:practice -- --level 1 --log=session_logs/my_practice.csv
 Use keyboard mode to test without a MIDI device:
 
 ```bash
-bazel run //:practice -- --level 1 --keyboard
+bazel run //tutor:practice -- --level 1 --keyboard
 ```
 
 Use both flags together for silent terminal-only testing:
 
 ```bash
-bazel run //:practice -- --level 1 --keyboard --quiet
+bazel run //tutor:practice -- --level 1 --keyboard --quiet
 ```
 
 Type note names per attempt (space separated), for example:
@@ -115,13 +115,13 @@ If you get a chord wrong, the app prints the target semitone tuple and asks agai
 Use analyze mode to print detected chords continuously instead of running prompts:
 
 ```bash
-bazel run //:practice -- --analyze
+bazel run //tutor:practice -- --analyze
 ```
 
 You can combine it with keyboard mode for terminal-only input:
 
 ```bash
-bazel run //:practice -- --analyze --keyboard
+bazel run //tutor:practice -- --analyze --keyboard
 ```
 
 
